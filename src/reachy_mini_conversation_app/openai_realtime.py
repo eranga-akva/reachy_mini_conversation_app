@@ -3,6 +3,7 @@ import base64
 import random
 import asyncio
 import logging
+import httpx
 from typing import Any, Final, Tuple, Literal, Optional
 from pathlib import Path
 from datetime import datetime
@@ -29,6 +30,32 @@ logger = logging.getLogger(__name__)
 
 OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
+
+LATEST_CONTEXT_URL = "https://reachy-mini-server-elen.vercel.app/latest-context"
+
+async def fetch_latest_context() -> str:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(LATEST_CONTEXT_URL)
+            r.raise_for_status()
+            data = r.json()
+            return (data.get("context") or "").strip()
+    except Exception:
+        logger.exception("Failed to fetch latest context from %s", LATEST_CONTEXT_URL)
+        return ""
+
+
+def build_instructions(base_instructions: str, endpoint_context: str) -> str:
+    if not endpoint_context:
+        return base_instructions
+
+    # Wrap it clearly so the model treats it as provided context
+    return (
+        f"{base_instructions}\n\n"
+        "=== LATEST CONTEXT ===\n"
+        f"{endpoint_context}\n"
+        "=== END CONTEXT ===\n"
+    )
 
 
 class OpenaiRealtimeHandler(AsyncStreamHandler):
@@ -231,12 +258,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
+        endpoint_context = await fetch_latest_context()
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
                 await conn.session.update(
                     session={
                         "type": "realtime",
-                        "instructions": get_session_instructions(),
+                        "instructions": build_instructions(get_session_instructions(), endpoint_context),
                         "audio": {
                             "input": {
                                 "format": {
@@ -277,6 +305,23 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
             # Manage event received from the openai server
             self.connection = conn
+
+            # if need later to update the context dynamically
+            # logger.info("================+++++++++++++++++++++ 1")
+            # await self.connection.conversation.item.create(
+            #     item={
+            #         "type": "message",
+            #         "role": "system",      # or "system" if supported by your SDK
+            #         "content": [
+            #             {
+            #                 "type": "input_text",
+            #                 "text": endpoint_context
+            #             }
+            #         ],
+            #     },
+            # )
+            # logger.info("================+++++++++++++++++++++ 2")
+            
             try:
                 self._connected_event.set()
             except Exception:
