@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 
-LATEST_CONTEXT_URL = "https://reachy-mini-server-elen.vercel.app/latest-context"
+LATEST_CONTEXT_URL = "https://reachy-mini-server-elen.vercel.app/contexts"
 
 async def fetch_latest_context() -> str:
     try:
@@ -39,9 +39,18 @@ async def fetch_latest_context() -> str:
             r = await client.get(LATEST_CONTEXT_URL)
             r.raise_for_status()
             data = r.json()
-            return (data.get("context") or "").strip()
+
+            items = data.get("items", [])
+            texts = [
+                (item.get("body") or "").strip()
+                for item in items
+                if isinstance(item, dict) and item.get("body")
+            ]
+
+            return "\n\n".join(texts)
+
     except Exception:
-        logger.exception("Failed to fetch latest context from %s", LATEST_CONTEXT_URL)
+        logger.exception("Failed to fetch contexts from %s", CONTEXTS_URL)
         return ""
 
 
